@@ -3,3 +3,9 @@ dist
 node_modules
 .vscode-test/
 *.vsix
+testfolder/.env.json
+testfolder/a.http
+testfolder/test.sqlnb
+testfolder/voucher_WB91212.sqlnb
+testfolder/voucher_WB91215.sqlnb
+testfolder/voucher_WB91216.sqlnb

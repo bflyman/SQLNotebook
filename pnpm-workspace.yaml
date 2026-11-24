@@ -1,0 +1,8 @@
+allowBuilds:
+  '@vscode/vsce-sign': true
+  esbuild: true
+packages:
+  - '.'
+
+overrides:
+  glob: '^11.0.0'

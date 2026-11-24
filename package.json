@@ -1,0 +1,101 @@
+{
+  "name": "sqlnotebook",
+  "displayName": "SQLNotebook",
+  "description": "一个执行sql 并将生成结果保存到notebook的vs code 扩展",
+  "version": "0.0.3",
+  "engines": {
+    "vscode": "^1.144.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "keybindings": [
+      {
+        "command": "editor.action.triggerSuggest",
+        "key": "alt+.",
+        "mac": "alt+t",
+        "when": "editorTextFocus && editorLangId == 'sql'"
+      }
+    ],
+    "notebookRenderer": [
+      {
+        "id": "sql-grid-renderer",
+        "displayName": "SQL Interactive Grid Renderer",
+        "entrypoint": "./dist/renderer.js",
+        "mimeTypes": [
+          "application/vnd.sql-notebook+json"
+        ]
+      }
+    ],
+    "notebooks": [
+      {
+        "type": "sql-notebook",
+        "displayName": "SQL Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.sqlnb"
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "sql-notebook.switchEnvironment",
+        "title": "Environment",
+        "icon": "$(database)"
+      }
+    ],
+    "menus": {
+      "notebook/toolbar": [
+        {
+          "command": "sql-notebook.switchEnvironment",
+          "when": "resourceExtname == .sqlnb",
+          "group": "navigation@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+ 
+    "compile": "pnpm run check-types && pnpm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+ 
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "vscode:prepublish": "pnpm run bundle",
+    "bundle": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --loader:.node=file",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/mssql": "^12.3.0",
+    "@types/node": "24.x",
+    "@types/vscode": "^1.144.0",
+    "@types/vscode-notebook-renderer": "^1.72.4",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.5.0",
+    "node-sql-parser": "^5.4.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  },
+  "dependencies": {
+    "mssql": "^12.7.14"
+  }
+}
