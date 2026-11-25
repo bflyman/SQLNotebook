@@ -2,7 +2,11 @@
 
 一个mssql 工具
 
+## 打包
 
+``` cmd
+pnpm package
+```
 
 
 

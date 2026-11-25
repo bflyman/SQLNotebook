@@ -7,13 +7,16 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {dbManager } from './DBManager';
 import { registerSmartCompletion, refreshSchemaCache } from './completionProvider';
+import {GlobalConfigManager} from './GlobalConfigManager'
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 
 let sqlStatusBarItem: vscode.StatusBarItem;
+let configManager:GlobalConfigManager
 export async function activate(context: vscode.ExtensionContext) {
 
-
+    configManager=new GlobalConfigManager(context); 
     sqlStatusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Left, 
         100
@@ -42,68 +45,79 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('sql-notebook.switchEnvironment', switchEnvironment)
 );
     registerSmartCompletion(context);
+
+
+    const setPasswordCmd = vscode.commands.registerCommand('sql-notebook.setEnvironmentPassword', async () => {
+    const envs = configManager.getEnvironmentNames();
+    const pickedEnv = await vscode.window.showQuickPick(envs, {
+        placeHolder: '选择要设置密码的环境',
+    });
+    if (!pickedEnv) {
+        return;
+    }
+
+    const pwd = await vscode.window.showInputBox({
+        prompt: `输入环境 [${pickedEnv}] 的数据库密码`,
+        password: true,
+        ignoreFocusOut: true,
+    });
+    if (pwd !== undefined) {
+        await configManager.setEnvironmentPassword(pickedEnv, pwd);
+        vscode.window.showInformationMessage(`已安全保存 [${pickedEnv}] 的数据库密码`);
+    }
+});
+context.subscriptions.push(setPasswordCmd);
     await initDB();
     console.log('SQL Notebook extension is now active!');
 
     
 }
 
-async function switchEnvironment() {
-const editor = vscode.window.activeNotebookEditor;
-        if (!editor || editor.notebook.notebookType !== 'sql-notebook') {
-            return;
+
+async function switchEnvironment(){
+    const envs = configManager.getEnvironmentNames();
+
+    if (envs.length === 0) {
+        const action = await vscode.window.showWarningMessage(
+            '未配置 sqlnotebook.environments，请先在全局设置中添加环境',
+            '打开设置'
+        );
+        if (action === '打开设置') {
+            await vscode.commands.executeCommand('workbench.action.openSettings', 'sqlnotebook.environments');
         }
+        return;
+    }
 
-        const notebook = editor.notebook;
-        const currentEnv = notebook.metadata?.environment || '未选择';
-
-        // 1. 动态从外部配置文件加载环境
-        const envs = loadEnvironments();
-        const quickPickItems = Object.keys(envs).map(key => {
-            const env = envs[key];
-            return {
-                label: `$(database) ${env.name} (${key})`,
-                description: env.name,
-                envKey: key,
-                connectionString: env.connectionString
-            };
-        });
-
-        if (quickPickItems.length === 0) {
-            vscode.window.showWarningMessage('未在工作区找到有效的 .env.json 配置文件或环境为空');
-            return;
+    const currentEnv = configManager.getCurrentEnvironmentName();
+    const picked = await vscode.window.showQuickPick(
+        envs.map((name) => ({
+            label: name,
+            description: name === currentEnv ? '当前使用中' : undefined,
+        })),
+        {
+            placeHolder: `选择数据库环境（当前: ${currentEnv}）`,
         }
+    );
 
-        // 2. 弹出选择框
-        const selected = await vscode.window.showQuickPick(quickPickItems, {
-            placeHolder: `当前环境: [ ${currentEnv} ] - 请选择要切换的目标环境`
-        });
+    if (!picked || picked.label === currentEnv) {
+        return;
+    }
 
-        if (selected) {
-            // 3. 将选择的环境写入当前文件的 metadata
-            const newMetadata = {
-                ...notebook.metadata,
-                environment: selected.envKey,
-                connectionString: selected.connectionString
-            };
+    await configManager.setCurrentEnvironment(picked.label);
+    // await refreshStatusBar();
 
-            const edit = new vscode.WorkspaceEdit();
-            edit.set(notebook.uri, [
-                vscode.NotebookEdit.updateNotebookMetadata(newMetadata)
-            ]);
+    // if (onEnvironmentSwitched) {
+    //     await onEnvironmentSwitched(picked.label);
+    // }
 
-            await vscode.workspace.applyEdit(edit);
-            vscode.window.showInformationMessage(`已成功切换到: ${selected.envKey}`);
-            await dbManager.switchDatabase(selected.connectionString);
-            await refreshSchemaCache(async (sql: string) => {
-                return await dbManager.query(sql);
-            });
+    await initDB(picked.label);
+    // const connConfig = await configManager.getConnectionConfig(picked.label, true);
+    // dbManager.connect2(connConfig);
+    // updateStatusBar(picked.label);
 
-            updateStatusBar(selected.description);
-        }
-
+    vscode.window.showInformationMessage(`已切换环境至: ${picked.label}`);
 }
-
+ 
 // This method is called when your extension is deactivated
 export function deactivate() {
 
@@ -136,19 +150,18 @@ function loadEnvironments(): { [key: string]: { name: string; connectionString: 
 }
 
 
-async function initDB(){
-    const envs = loadEnvironments();
-    const envKeys = Object.keys(envs);
-
-    if (envKeys.length > 0) {
+async function initDB(currentEnv:string){
+    if(!currentEnv)
+       currentEnv = configManager.getCurrentEnvironmentName();
+    const config= await configManager.getConnectionConfig(currentEnv,true);
+    if (config) {
         // 2. 取第一个配置
-        const firstEnvKey = envKeys[0];
-        const defaultEnv = envs[firstEnvKey];
+       
 
         try {
             // 3. 自动加载到 dbManager 中建立初始连接池
-            await dbManager.connect(defaultEnv.connectionString);
-            vscode.window.showInformationMessage(`SQL Notebook: 已自动连接到 [${defaultEnv.name}]`);
+            await dbManager.connect2(config);
+            vscode.window.showInformationMessage(`SQL Notebook: 已自动连接到 [${currentEnv}]`);
 
             // 如果你同时配置了智能提示缓存，可以在这里顺便拉取一次 Schema
            
@@ -156,9 +169,9 @@ async function initDB(){
                 return await dbManager.query(sql);
             });
            
-            updateStatusBar(defaultEnv.name);
+            updateStatusBar(currentEnv);
         } catch (err: any) {
-            vscode.window.showErrorMessage(`自动连接数据库失败 (${defaultEnv.name}): ${err.message}`);
+            vscode.window.showErrorMessage(`自动连接数据库失败 (${currentEnv}): ${err.message}`);
             updateStatusBar('连接失败' );
         }
     } else {

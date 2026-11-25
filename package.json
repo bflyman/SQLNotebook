@@ -2,7 +2,8 @@
   "name": "sqlnotebook",
   "displayName": "SQLNotebook",
   "description": "一个执行sql 并将生成结果保存到notebook的vs code 扩展",
-  "version": "0.0.3",
+  "version": "0.0.4",
+  "repository": "https://github.com/bflyman/SQLNotebook",
   "engines": {
     "vscode": "^1.144.0"
   },
@@ -46,7 +47,11 @@
         "command": "sql-notebook.switchEnvironment",
         "title": "Environment",
         "icon": "$(database)"
-      }
+      },
+      {
+  "command": "sql-notebook.setEnvironmentPassword",
+  "title": "SQL Notebook: Set Environment Password"
+}
     ],
     "menus": {
       "notebook/toolbar": [
@@ -56,7 +61,52 @@
           "group": "navigation@1"
         }
       ]
+    },
+    "configuration": {
+      "title": "SQL Notebook",
+      "properties": {
+        "sqlnotebook.defaultEnvironment": {
+          "type": "string",
+          "default": "dev",
+          "description": "默认使用的数据库连接环境名称"
+        },
+        "sqlnotebook.environments": {
+          "type": "object",
+          "default": {
+            "dev": {
+              "server": "localhost",
+              "port": 1433,
+              "database": "DevDB",
+              "user": "sa",
+              "encrypt": false,
+              "trustServerCertificate": true
+            },
+            "prod": {
+              "server": "prod-db.example.com",
+              "port": 1433,
+              "database": "ProdDB",
+              "user": "readonly_user",
+              "encrypt": true,
+              "trustServerCertificate": false
+            }
+          },
+          "description": "全局数据库连接环境配置映射（密码建议保存在 SecretStorage 中）",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "server": { "type": "string" },
+              "port": { "type": "number", "default": 1433 },
+              "database": { "type": "string" },
+              "user": { "type": "string" },
+              "encrypt": { "type": "boolean", "default": true },
+              "trustServerCertificate": { "type": "boolean", "default": false }
+            },
+            "required": ["server", "database"]
+          }
+        }
+      }
     }
+
   },
   "scripts": {
  
