@@ -1,242 +1,11 @@
 import * as vscode from 'vscode';
 import * as sql from 'mssql';
-import {dbManager } from './DBManager';
-function convertToHTMLGridTable(recordset: any[]): string {
-    if (!recordset || recordset.length === 0) {
-        return `
-            <div style="padding: 12px; font-family: var(--vscode-editor-font-family, sans-serif); color: var(--vscode-descriptionForeground); font-style: italic;">
-                查询成功，但返回了 0 行数据。
-            </div>
-        `;
-    }
-
-    const headers = Object.keys(recordset[0]);
-
-    let html = `
-    <div style="
-        max-height: 480px; 
-        overflow: auto; 
-        border: 1px solid var(--vscode-panel-border, #333); 
-        border-radius: 4px; 
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        margin: 6px 0;
-    ">
-        <table style="
-            border-collapse: collapse; 
-            width: 100%; 
-            font-family: var(--vscode-editor-font-family, monospace); 
-            font-size: 12px; 
-            line-height: 1.5; 
-            text-align: left;
-            color: var(--vscode-editor-foreground, #ccc);
-        ">
-            <thead>
-                <tr style="
-                    background-color: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e); 
-                    position: sticky; 
-                    top: 0; 
-                    z-index: 2;
-                    border-bottom: 2px solid var(--vscode-panel-border, #444);
-                ">
-    `;
-
-    // 渲染表头
-    for (const header of headers) {
-        html += `<th style="
-            padding: 8px 12px; 
-            border-right: 1px solid var(--vscode-panel-border, #333); 
-            font-weight: 600;
-            white-space: nowrap;
-        ">${escapeHtml(header)}</th>`;
-    }
-
-    html += `
-                </tr>
-            </thead>
-            <tbody>
-    `;
-
-    // 渲染数据行
-    recordset.forEach((row, index) => {
-        const rowBg = index % 2 === 0
-            ? 'transparent'
-            : 'var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.02))';
-
-        html += `<tr style="background-color: ${rowBg}; border-bottom: 1px solid var(--vscode-panel-border, #2a2d2e);">`;
-
-        for (const header of headers) {
-            const val = row[header];
-            let displayVal: string;
-
-            if (val === null || val === undefined) {
-                displayVal = '<span style="color: var(--vscode-disabledForeground, #777); font-style: italic;">NULL</span>';
-            } else if (typeof val === 'boolean') {
-                displayVal = `<span style="color: ${val ? '#4ec9b0' : '#ce9178'};">${val}</span>`;
-            } else {
-                displayVal = escapeHtml(String(val));
-            }
-
-            html += `<td style="
-                padding: 6px 12px; 
-                border-right: 1px solid var(--vscode-panel-border, #2a2d2e); 
-                max-width: 400px; 
-                overflow: hidden; 
-                text-overflow: ellipsis; 
-                white-space: nowrap;
-            " title="${escapeHtml(String(val ?? ''))}">${displayVal}</td>`;
-        }
-        html += `</tr>`;
-    });
-
-    html += `
-            </tbody>
-        </table>
-    </div>
-    <div style="
-        font-family: var(--vscode-editor-font-family, sans-serif); 
-        font-size: 11px; 
-        color: var(--vscode-descriptionForeground, #888); 
-        margin-top: 4px;
-        display: flex;
-        justify-content: space-between;
-    ">
-        <span>共 <b>${recordset.length}</b> 行记录</span>
-        <span>SQL Notebook 渲染器</span>
-    </div>
-    `;
-
-    return html;
-}
-
-function escapeHtml(str: string): string {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
+import { dbManager } from './DBManager';
 
 
-// 将 recordset 转换为包含 Grid.js 交互表格的 HTML 片段
-function convertToGridJsTable(recordset: any[]): string {
-    if (!recordset || recordset.length === 0) {
-        return `
-            <div style="padding: 12px; font-family: var(--vscode-editor-font-family, sans-serif); color: var(--vscode-descriptionForeground); font-style: italic;">
-                查询成功，但返回了 0 行数据。
-            </div>
-        `;
-    }
+import { cellStore } from './CellResultStore';
 
-    // 1. 提取表头和数据，供 Grid.js 使用
-    const columns = Object.keys(recordset[0]);
-    // 将对象数组转为 Grid.js 所需的二维数组格式
-    const data = recordset.map(row => columns.map(col => row[col] !== null && row[col] !== undefined ? row[col] : 'NULL'));
 
-    // 生成唯一 DOM ID，防止多个单元格同时渲染时 ID 冲突
-    const tableId = `grid-table-${Math.random().toString(36).substring(2, 9)}`;
-
-    // 2. 拼接包含 Grid.js CDN 的完整 HTML 字符串
-    return `
-    <div style="font-family: var(--vscode-editor-font-family, sans-serif);">
-        <!-- 引入 Grid.js 样式文件 -->
-        <link href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css" rel="stylesheet" />
-        
-        <!-- 表格挂载容器 -->
-        <div id="${tableId}" style="margin: 6px 0;"></div>
-
-        <!-- 引入 Grid.js 核心脚本并初始化 -->
-        <script type="module">
-            import { Grid } from 'https://unpkg.com/gridjs?module';
-
-            new Grid({
-                columns: ${JSON.stringify(columns)},
-                data: ${JSON.stringify(data)},
-                pagination: {
-                    limit: 10,
-                    summary: true
-                },
-                search: true,
-                sort: true,
-                style: {
-                    table: {
-                        'font-size': '12px',
-                        'width': '100%'
-                    },
-                    th: {
-                        'background-color': 'var(--vscode-editor-inactiveSelectionBackground, #2a2d2e)',
-                        'color': 'var(--vscode-editor-foreground, #ccc)',
-                        'border-bottom': '2px solid var(--vscode-panel-border, #444)'
-                    },
-                    td: {
-                        'color': 'var(--vscode-editor-foreground, #ccc)',
-                        'border-bottom': '1px solid var(--vscode-panel-border, #333)'
-                    }
-                }
-            }).render(document.getElementById('${tableId}'));
-        </script>
-    </div>
-    <div style="font-size: 11px; color: var(--vscode-descriptionForeground, #888); margin-top: 4px;">
-        <span>共 ${recordset.length} 行记录 (Grid.js Interactive Grid)</span>
-    </div>
-    `;
-}
-function convertToMarkdownTable(recordset: any[]): string {
-    if (!recordset || recordset.length === 0) {
-        return '查询成功，但返回了 0 行数据。';
-    }
-
-    const headers = Object.keys(recordset[0]);
-    const lines: string[] = [];
-
-    // 1. 生成表头行
-    lines.push(`| ${headers.join(' | ')} |`);
-
-    // 2. 生成对隔线
-    lines.push(`| ${headers.map(() => '---').join(' | ')} |`);
-
-    // 3. 填充数据行
-    for (const row of recordset) {
-        const values = headers.map(header => {
-            const val = row[header];
-            if (val === null || val === undefined) {
-                return 'NULL';
-            }
-            // 将单元格内的换行符替换掉，防止破坏 Markdown 表格结构
-            return String(val).replace(/[\r\n]+/g, ' ');
-        });
-        lines.push(`| ${values.join(' | ')} |`);
-    }
-
-    return lines.join('\n');
-}
-// 辅助函数：将查询结果转换为 CSV 格式
-function convertToCSV(recordset: any[]): string {
-    if (!recordset || recordset.length === 0) {
-        return '查询成功，但返回了 0 行数据。';
-    }
-
-    const headers = Object.keys(recordset[0]);
-    const csvRows: string[] = [];
-
-    // 添加表头
-    csvRows.push(headers.join(','));
-
-    // 填充数据行
-    for (const row of recordset) {
-        const values = headers.map(header => {
-            const val = row[header];
-            if (val === null || val === undefined) {
-                return '""';
-            }
-            const stringVal = String(val).replace(/"/g, '""');
-            return `"${stringVal}"`;
-        });
-        csvRows.push(values.join(','));
-    }
-
-    return csvRows.join('\n');
-}
 
 export class SqlNotebookController {
     readonly controllerId = 'sql-notebook-controller';
@@ -252,7 +21,7 @@ export class SqlNotebookController {
             this.label
         );
 
-        this._controller.supportedLanguages = ['sql', 'csv'];
+        this._controller.supportedLanguages = ['sql'];
         this._controller.supportsExecutionOrder = true;
         this._controller.executeHandler = this._execute.bind(this);
     }
@@ -271,27 +40,29 @@ export class SqlNotebookController {
     private async _executeCell(cell: vscode.NotebookCell, notebook: vscode.NotebookDocument): Promise<void> {
         const execution = this._controller.createNotebookCellExecution(cell);
         execution.start(Date.now());
- 
-     
-     
+
+
+
         try {
+            const docUri = cell.notebook.uri.toString();
             const sqlQuery = cell.document.getText();
+            const directives = parseCellDirectives(sqlQuery);
+            const sqlList = injectNamedCellPlaceholdersToList(sqlQuery, directives, (name) => cellStore.get(docUri, name));
             if (!sqlQuery.trim()) {
                 throw new Error('SQL 查询语句不能为空！');
             }
 
-       
-            const result=await dbManager.query(sqlQuery);
-            // 3. 将结果转为 Markdown 表格格式
- 
+            const cellQueryResult = await executeSqlList(
+                sqlList,
+                (sql) => dbManager.query(sql)
+            );
 
-            // 4. 输出到 Notebook 单元格
+            setNameOfValue(directives, cellQueryResult, docUri);
             execution.replaceOutput([
                 new vscode.NotebookCellOutput([
-                    vscode.NotebookCellOutputItem.json(result.recordset, 'application/vnd.sql-notebook+json')
+                    vscode.NotebookCellOutputItem.json(cellQueryResult.rows, 'application/vnd.sql-notebook+json')
                 ])
             ]);
-
             execution.end(true, Date.now());
         } catch (err: any) {
             execution.replaceOutput([
@@ -300,13 +71,247 @@ export class SqlNotebookController {
                 ])
             ]);
             execution.end(false, Date.now());
-           
-        }finally {
-            
+
+        } finally {
+
         }
     }
 
     dispose() {
         this._controller.dispose();
     }
+}
+
+
+export interface ParsedCellDirectives {
+    /** 当前 Cell 的名称，如 `-- @name active_users` */
+    cellName?: string;
+    /** 引用的前置命名 Cell 名称，如 `-- @from active_users` */
+    fromName?: string;
+    /** 从前置结果中提取的列名，如 `-- @column id` */
+    columnName?: string;
+}
+
+export function parseCellDirectives(sqlText: string): ParsedCellDirectives {
+    const directives: ParsedCellDirectives = {};
+    const lines = sqlText.split(/\r?\n/);
+
+    // 只在开头连续的 SQL 注释行中扫描指令，避免误伤 SQL 正文里的注释
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line.startsWith('--')) {
+            break;
+        }
+
+        const nameMatch = line.match(/^--\s*@(?:name|as)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$/i);
+        if (nameMatch?.[1]) {
+            directives.cellName = nameMatch[1];
+            continue;
+        }
+
+        const fromMatch = line.match(/^--\s*@(?:from|ref)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$/i);
+        if (fromMatch?.[1]) {
+            directives.fromName = fromMatch[1];
+            continue;
+        }
+
+        const colMatch = line.match(/^--\s*@column\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$/i);
+        if (colMatch?.[1]) {
+            directives.columnName = colMatch[1];
+        }
+    }
+
+    return directives;
+}
+
+export interface CellQueryResult {
+    columns: string[];
+    rows: Record<string, unknown>[];
+}
+
+function formatSqlLiteral(value: unknown): string {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+    }
+    if (typeof value === 'boolean') {
+        return value ? '1' : '0';
+    }
+    const escaped = String(value).replace(/'/g, "''");
+    return `'${escaped}'`;
+}
+
+
+
+export function injectNamedCellPlaceholdersToList(
+    sqlText: string,
+    directives: ParsedCellDirectives,
+    getNamedResult: (name: string) => CellQueryResult | undefined
+): string[] {
+    const placeholderRegex = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
+
+    if (directives.fromName && !getNamedResult(directives.fromName)) {
+        throw new Error(`未找到名为 "${directives.fromName}" 的前置 Cell 结果，请先执行该 Cell。`);
+    }
+
+    // 找出 SQL 中引用的所有占位符
+    const matches = Array.from(sqlText.matchAll(placeholderRegex));
+
+    // 如果没有占位符，直接返回单条 SQL 数组
+    if (matches.length === 0) {
+        return [sqlText];
+    }
+
+    // 按引用的第一个结果集决定行数（若引用了多个 Cell，取对应结果集的 rows 长度）
+    const primaryCellName = matches[0][1];
+    const primaryResult = getNamedResult(primaryCellName);
+    if (!primaryResult) {
+        throw new Error(`未找到名为 "${primaryCellName}" 的前置 Cell 结果，请先执行该 Cell。`);
+    }
+
+    // rows 有 0 行时，返回空数组（不执行任何行）
+    if (primaryResult.rows.length === 0) {
+        return [];
+    }
+
+    // 逐行生成对应的 SQL 语句
+    return primaryResult.rows.map((_row, rowIndex) => {
+        return sqlText.replace(placeholderRegex, (_fullMatch, refCellName: string, refColumnName: string) => {
+            const sourceResult = getNamedResult(refCellName);
+            if (!sourceResult) {
+                throw new Error(`未找到名为 "${refCellName}" 的前置 Cell 结果，请先执行该 Cell。`);
+            }
+
+            const matchedCol = sourceResult.columns.find(
+                (col) => col.toLowerCase() === refColumnName.toLowerCase()
+            );
+            if (!matchedCol) {
+                throw new Error(
+                    `前置 Cell "${refCellName}" 中不存在列 "${refColumnName}"（可用列: ${sourceResult.columns.join(', ')}）。`
+                );
+            }
+
+            const targetRow = sourceResult.rows[rowIndex];
+            if (!targetRow) {
+                throw new Error(
+                    `前置 Cell "${refCellName}" 只有 ${sourceResult.rows.length} 行，缺少第 ${rowIndex + 1} 行数据。`
+                );
+            }
+
+            return formatSqlLiteral(targetRow[matchedCol]);
+        });
+    });
+}
+export function injectNamedCellPlaceholders(
+    sqlText: string,
+    directives: ParsedCellDirectives,
+    getNamedResult: (name: string) => CellQueryResult | undefined
+): string {
+    // 匹配 {{cellName.columnName}}，允许前后有空格如 {{ target_users.id }}
+    const placeholderRegex = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
+
+    // 1. 先检查 -- @from 声明的前置结果是否已执行
+    if (directives.fromName && !getNamedResult(directives.fromName)) {
+        throw new Error(`未找到名为 "${directives.fromName}" 的前置 Cell 结果，请先执行该 Cell。`);
+    }
+
+    // 2. 逐个替换 {{cellName.columnName}}
+    return sqlText.replace(placeholderRegex, (_match, refCellName: string, refColumnName: string) => {
+        const sourceResult = getNamedResult(refCellName);
+        if (!sourceResult) {
+            throw new Error(`未找到名为 "${refCellName}" 的前置 Cell 结果，请先执行该 Cell。`);
+        }
+
+        // 不区分大小写匹配列名，兼容 SQL Server 常见大小写差异
+        const matchedCol = sourceResult.columns.find(
+            (col) => col.toLowerCase() === refColumnName.toLowerCase()
+        );
+        if (!matchedCol) {
+            throw new Error(
+                `前置 Cell "${refCellName}" 中不存在列 "${refColumnName}"（可用列: ${sourceResult.columns.join(', ')}）。`
+            );
+        }
+
+        const values = sourceResult.rows
+            .map((row) => row[matchedCol])
+            .filter((v): v is string | number | boolean => v !== null && v !== undefined);
+
+        const uniqueLiterals = Array.from(new Set(values.map(formatSqlLiteral)));
+        return uniqueLiterals.length > 0 ? uniqueLiterals.join(', ') : 'NULL';
+    });
+}
+
+function setNameOfValue(directives: ParsedCellDirectives, result: CellQueryResult, uri: string) {
+    if (!directives.cellName) {
+        return;
+
+    }
+    
+
+    cellStore.set(uri, {
+        name: directives.cellName,
+        columns:result.columns,
+        rows:result.rows,
+        executedAt: Date.now(),
+    });
+}
+
+
+export async function executeSqlList(
+    sqlList: string[],
+    runSingleSql: (sql: string) => Promise<{
+        recordset?: Record<string, unknown>[] & { columns?: Record<string, unknown> };
+        rowsAffected?: number[];
+    }>
+): Promise<CellQueryResult> {
+    const rawRows: Record<string, unknown>[] = [];
+    const columnSet = new Set<string>();
+    let totalRowsAffected = 0;
+
+    for (const sql of sqlList) {
+        const result = await runSingleSql(sql);
+
+        if (result.recordset?.columns) {
+            for (const colName of Object.keys(result.recordset.columns)) {
+                columnSet.add(colName);
+            }
+        }
+
+        if (result.recordset?.length) {
+            for (const row of result.recordset) {
+                for (const key of Object.keys(row)) {
+                    columnSet.add(key);
+                }
+                rawRows.push(row);
+            }
+        }
+
+        if (result.rowsAffected?.length) {
+            totalRowsAffected += result.rowsAffected.reduce((sum, n) => sum + n, 0);
+        }
+    }
+
+    // 有查询行时按统一列顺序补齐字段；无查询行（如 UPDATE/INSERT）时生成单行摘要
+    if (rawRows.length > 0) {
+        const columns = Array.from(columnSet);
+        const rows = rawRows.map((row) => {
+            const normalizedRow: Record<string, unknown> = {};
+            for (const col of columns) {
+                normalizedRow[col] = Object.prototype.hasOwnProperty.call(row, col) ? row[col] : null;
+            }
+            return normalizedRow;
+        });
+
+        return { columns, rows };
+    }
+
+    const summaryRow: Record<string, unknown> = {
+        status: 'OK',
+        queriesExecuted: sqlList.length,
+        rowsAffected: totalRowsAffected,
+    };
+
+    return {
+        columns: Object.keys(summaryRow),
+        rows: [summaryRow],
+    };
 }

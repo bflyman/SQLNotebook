@@ -1,6 +1,7 @@
 import * as sql from 'mssql';
 import { EnvConnectionConfig } from './GlobalConfigManager';
 
+
 class DbManager {
     private pool: sql.ConnectionPool | null = null;
     private currentConnStr: string | null = null;
